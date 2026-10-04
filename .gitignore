@@ -1,0 +1,8 @@
+/bin/
+/dist/
+/.cache/
+*.test
+coverage.out
+.env
+.env.*
+.DS_Store

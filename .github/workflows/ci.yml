@@ -1,0 +1,72 @@
+name: Go checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Resolve and verify dependencies
+        run: |
+          test -s go.sum
+          go mod download
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go mod verify
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd internal)"
+
+      # A dependency change that alters the notice file must not ship silently.
+      - name: Check third-party notices
+        run: |
+          bash scripts/third-party-licenses.sh
+          git diff --exit-code -- THIRD_PARTY_LICENSES.md
+
+      - run: go vet ./...
+
+      - run: go test -race -shuffle=on -cover ./...
+
+      - name: Lint
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      - name: Check known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+      - name: Cross-build archives
+        run: bash scripts/build-release.sh dev
+
+      - name: Build and smoke-test container
+        run: |
+          docker build --build-arg VERSION=dev -t intruder-mcp-go:ci .
+          docker run --rm intruder-mcp-go:ci -version
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: intruder-mcp-build
+          path: |
+            dist/*
+            go.mod
+            go.sum
+          if-no-files-found: error
+          retention-days: 14
